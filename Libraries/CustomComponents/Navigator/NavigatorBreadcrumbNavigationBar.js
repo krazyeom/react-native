@@ -1,13 +1,13 @@
 /**
  * Copyright (c) 2015, Facebook, Inc.  All rights reserved.
  *
- * Facebook, Inc. (“Facebook”) owns all right, title and interest, including
+ * Facebook, Inc. ("Facebook") owns all right, title and interest, including
  * all intellectual property and other proprietary rights, in and to the React
- * Native CustomComponents software (the “Software”).  Subject to your
+ * Native CustomComponents software (the "Software").  Subject to your
  * compliance with these terms, you are hereby granted a non-exclusive,
  * worldwide, royalty-free copyright license to (1) use and copy the Software;
  * and (2) reproduce and distribute the Software as part of your own software
- * (“Your Software”).  Facebook reserves all rights not expressly granted to
+ * ("Your Software").  Facebook reserves all rights not expressly granted to
  * you in this license agreement.
  *
  * THE SOFTWARE AND DOCUMENTATION, IF ANY, ARE PROVIDED "AS IS" AND ANY EXPRESS
@@ -32,6 +32,10 @@ var React = require('React');
 var StaticContainer = require('StaticContainer.react');
 var StyleSheet = require('StyleSheet');
 var View = require('View');
+
+var { Map } = require('immutable');
+
+var invariant = require('invariant');
 
 var Interpolators = NavigatorBreadcrumbNavigationBarStyles.Interpolators;
 var PropTypes = React.PropTypes;
@@ -84,7 +88,6 @@ var NavigatorBreadcrumbNavigationBar = React.createClass({
     }),
     navState: React.PropTypes.shape({
       routeStack: React.PropTypes.arrayOf(React.PropTypes.object),
-      idStack: React.PropTypes.arrayOf(React.PropTypes.number),
       presentedIndex: React.PropTypes.number,
     }),
     style: View.propTypes.style,
@@ -99,6 +102,10 @@ var NavigatorBreadcrumbNavigationBar = React.createClass({
     var oldDistToCenter = index - fromIndex;
     var newDistToCenter = index - toIndex;
     var interpolate;
+    invariant(
+      Interpolators[index],
+      'Cannot find breadcrumb interpolators for ' + index
+    );
     if (oldDistToCenter > 0 && newDistToCenter === 0 ||
         newDistToCenter > 0 && oldDistToCenter === 0) {
       interpolate = Interpolators[index].RightToCenter;
@@ -138,11 +145,48 @@ var NavigatorBreadcrumbNavigationBar = React.createClass({
     }
   },
 
+  onAnimationStart: function(fromIndex, toIndex) {
+    var max = Math.max(fromIndex, toIndex);
+    var min = Math.min(fromIndex, toIndex);
+    for (var index = min; index <= max; index++) {
+      this._setRenderViewsToHardwareTextureAndroid(index, true);
+    }
+  },
+
+  onAnimationEnd: function() {
+    var max = this.props.navState.routeStack.length - 1;
+    for (var index = 0; index <= max; index++) {
+      this._setRenderViewsToHardwareTextureAndroid(index, false);
+    }
+  },
+
+  _setRenderViewsToHardwareTextureAndroid: function(index, renderToHardwareTexture) {
+    var props = {
+      renderToHardwareTextureAndroid: renderToHardwareTexture,
+    };
+
+    this.refs['icon_' + index].setNativeProps(props);
+    this.refs['separator_' + index].setNativeProps(props);
+    this.refs['title_' + index].setNativeProps(props);
+    var right = this.refs['right_' + index];
+    if (right) {
+      right.setNativeProps(props);
+    }
+  },
+
+  componentWillMount: function() {
+    this._descriptors = {
+      crumb: new Map(),
+      title: new Map(),
+      right: new Map(),
+    };
+  },
+
   render: function() {
     var navState = this.props.navState;
-    var icons = navState && navState.routeStack.map(this._renderOrReturnBreadcrumb);
-    var titles = navState.routeStack.map(this._renderOrReturnTitle);
-    var buttons = navState.routeStack.map(this._renderOrReturnRightButton);
+    var icons = navState && navState.routeStack.map(this._getBreadcrumb);
+    var titles = navState.routeStack.map(this._getTitle);
+    var buttons = navState.routeStack.map(this._getRightButton);
     return (
       <View style={[styles.breadCrumbContainer, this.props.style]}>
         {titles}
@@ -152,104 +196,69 @@ var NavigatorBreadcrumbNavigationBar = React.createClass({
     );
   },
 
-  _renderOrReturnBreadcrumb: function(route, index) {
-    var uid = this.props.navState.idStack[index];
-    var navBarRouteMapper = this.props.routeMapper;
-    var navOps = this.props.navigator;
-    var alreadyRendered = this.refs['crumbContainer' + uid];
-    if (alreadyRendered) {
-      // Don't bother re-calculating the children
-      return (
-        <StaticContainer
-          ref={'crumbContainer' + uid}
-          key={'crumbContainer' + uid}
-          shouldUpdate={false}
-        />
-      );
+  _getBreadcrumb: function(route, index) {
+    if (this._descriptors.crumb.has(route)) {
+      return this._descriptors.crumb.get(route);
     }
+
+    var navBarRouteMapper = this.props.routeMapper;
     var firstStyles = initStyle(index, navStatePresentedIndex(this.props.navState));
-    return (
-      <StaticContainer
-        ref={'crumbContainer' + uid}
-        key={'crumbContainer' + uid}
-        shouldUpdate={false}>
-        <View ref={'crumb_' + index} style={firstStyles.Crumb}>
-          <View ref={'icon_' + index} style={firstStyles.Icon}>
-            {navBarRouteMapper.iconForRoute(route, navOps)}
-          </View>
-          <View ref={'separator_' + index} style={firstStyles.Separator}>
-            {navBarRouteMapper.separatorForRoute(route, navOps)}
-          </View>
+
+    var breadcrumbDescriptor = (
+      <View ref={'crumb_' + index} style={firstStyles.Crumb}>
+        <View ref={'icon_' + index} style={firstStyles.Icon}>
+          {navBarRouteMapper.iconForRoute(route, this.props.navigator)}
         </View>
-      </StaticContainer>
+        <View ref={'separator_' + index} style={firstStyles.Separator}>
+          {navBarRouteMapper.separatorForRoute(route, this.props.navigator)}
+        </View>
+      </View>
     );
+
+    this._descriptors.crumb = this._descriptors.crumb.set(route, breadcrumbDescriptor);
+    return breadcrumbDescriptor;
   },
 
-  _renderOrReturnTitle: function(route, index) {
-    var navState = this.props.navState;
-    var uid = navState.idStack[index];
-    var alreadyRendered = this.refs['titleContainer' + uid];
-    if (alreadyRendered) {
-      // Don't bother re-calculating the children
-      return (
-        <StaticContainer
-          ref={'titleContainer' + uid}
-          key={'titleContainer' + uid}
-          shouldUpdate={false}
-        />
-      );
+  _getTitle: function(route, index) {
+    if (this._descriptors.title.has(route)) {
+      return this._descriptors.title.get(route);
     }
-    var navBarRouteMapper = this.props.routeMapper;
-    var titleContent = navBarRouteMapper.titleContentForRoute(
-      navState.routeStack[index],
+
+    var titleContent = this.props.routeMapper.titleContentForRoute(
+      this.props.navState.routeStack[index],
       this.props.navigator
     );
     var firstStyles = initStyle(index, navStatePresentedIndex(this.props.navState));
-    return (
-      <StaticContainer
-        ref={'titleContainer' + uid}
-        key={'titleContainer' + uid}
-        shouldUpdate={false}>
-        <View ref={'title_' + index} style={firstStyles.Title}>
-          {titleContent}
-        </View>
-      </StaticContainer>
+
+    var titleDescriptor = (
+      <View ref={'title_' + index} style={firstStyles.Title}>
+        {titleContent}
+      </View>
     );
+    this._descriptors.title = this._descriptors.title.set(route, titleDescriptor);
+    return titleDescriptor;
   },
 
-  _renderOrReturnRightButton: function(route, index) {
-    var navState = this.props.navState;
-    var navBarRouteMapper = this.props.routeMapper;
-    var uid = navState.idStack[index];
-    var alreadyRendered = this.refs['rightContainer' + uid];
-    if (alreadyRendered) {
-      // Don't bother re-calculating the children
-      return (
-        <StaticContainer
-          ref={'rightContainer' + uid}
-          key={'rightContainer' + uid}
-          shouldUpdate={false}
-        />
-      );
+  _getRightButton: function(route, index) {
+    if (this._descriptors.right.has(route)) {
+      return this._descriptors.right.get(route);
     }
-    var rightContent = navBarRouteMapper.rightContentForRoute(
-      navState.routeStack[index],
+    var rightContent = this.props.routeMapper.rightContentForRoute(
+      this.props.navState.routeStack[index],
       this.props.navigator
     );
     if (!rightContent) {
+      this._descriptors.right = this._descriptors.right.set(route, null);
       return null;
     }
     var firstStyles = initStyle(index, navStatePresentedIndex(this.props.navState));
-    return (
-      <StaticContainer
-        ref={'rightContainer' + uid}
-        key={'rightContainer' + uid}
-        shouldUpdate={false}>
-        <View ref={'right_' + index} style={firstStyles.RightItem}>
-          {rightContent}
-        </View>
-      </StaticContainer>
+    var rightButtonDescriptor = (
+      <View ref={'right_' + index} style={firstStyles.RightItem}>
+        {rightContent}
+      </View>
     );
+    this._descriptors.right = this._descriptors.right.set(route, rightButtonDescriptor);
+    return rightButtonDescriptor;
   },
 });
 
@@ -260,7 +269,7 @@ var styles = StyleSheet.create({
     height: NavigatorNavigationBarStyles.General.TotalNavHeight,
     top: 0,
     left: 0,
-    width: NavigatorNavigationBarStyles.General.ScreenWidth,
+    right: 0,
   },
 });
 

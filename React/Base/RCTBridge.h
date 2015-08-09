@@ -10,11 +10,33 @@
 #import <UIKit/UIKit.h>
 
 #import "RCTBridgeModule.h"
+#import "RCTDefines.h"
+#import "RCTFrameUpdate.h"
 #import "RCTInvalidating.h"
 #import "RCTJavaScriptExecutor.h"
 
 @class RCTBridge;
 @class RCTEventDispatcher;
+
+/**
+ * This notification triggers a reload of all bridges currently running.
+ */
+RCT_EXTERN NSString *const RCTReloadNotification;
+
+/**
+ * This notification fires when the bridge has finished loading.
+ */
+RCT_EXTERN NSString *const RCTJavaScriptDidLoadNotification;
+
+/**
+ * This notification fires when the bridge failed to load.
+ */
+RCT_EXTERN NSString *const RCTJavaScriptDidFailToLoadNotification;
+
+/**
+ * This notification fires when the bridge created all registered native modules
+ */
+RCT_EXTERN NSString *const RCTDidCreateNativeModules;
 
 /**
  * This block can be used to instantiate modules that require additional
@@ -26,14 +48,22 @@
  */
 typedef NSArray *(^RCTBridgeModuleProviderBlock)(void);
 
-extern NSString *const RCTReloadBridge;
+/**
+ * Register the given class as a bridge module. All modules must be registered
+ * prior to the first bridge initialization.
+ *
+ */
+RCT_EXTERN void RCTRegisterModule(Class);
+
+/**
+ * This function returns the module name for a given class.
+ */
+RCT_EXTERN NSString *RCTBridgeModuleNameForClass(Class bridgeModuleClass);
 
 /**
  * Async batched bridge used to communicate with the JavaScript application.
  */
 @interface RCTBridge : NSObject <RCTInvalidating>
-
-@property (nonatomic, assign, readonly, getter=isLoaded) BOOL loaded;
 
 /**
  * The designated initializer. This creates a new bridge on top of the specified
@@ -43,29 +73,38 @@ extern NSString *const RCTReloadBridge;
  * array of pre-initialized module instances if they require additional init
  * parameters or configuration.
  */
-- (instancetype)initWithBundlePath:(NSString *)bundlepath
-                    moduleProvider:(RCTBridgeModuleProviderBlock)block
-                     launchOptions:(NSDictionary *)launchOptions NS_DESIGNATED_INITIALIZER;
+- (instancetype)initWithBundleURL:(NSURL *)bundleURL
+                   moduleProvider:(RCTBridgeModuleProviderBlock)block
+                    launchOptions:(NSDictionary *)launchOptions NS_DESIGNATED_INITIALIZER;
 
 /**
  * This method is used to call functions in the JavaScript application context.
  * It is primarily intended for use by modules that require two-way communication
- * with the JavaScript code.
+ * with the JavaScript code. Safe to call from any thread.
  */
 - (void)enqueueJSCall:(NSString *)moduleDotMethod args:(NSArray *)args;
 
 /**
- * This method is used to execute a new application script. It is called
- * internally whenever a JS application bundle is loaded/reloaded, but should
- * probably not be used at any other time.
+ * DEPRECATED: Do not use.
  */
-- (void)enqueueApplicationScript:(NSString *)script url:(NSURL *)url onComplete:(RCTJavaScriptCompleteBlock)onComplete;
+#define RCT_IMPORT_METHOD(module, method) \
+  _Pragma("message(\"This macro is no longer required\")")
+
+/**
+ * URL of the script that was loaded into the bridge.
+ */
+@property (nonatomic, copy) NSURL *bundleURL;
 
 @property (nonatomic, strong) Class executorClass;
 
 /**
  * The event dispatcher is a wrapper around -enqueueJSCall:args: that provides a
  * higher-level interface for sending UI events such as touches and text input.
+ *
+ * NOTE: RCTEventDispatcher is now a bridge module, this is implemented as a
+ * category but remains declared in the bridge to avoid breaking changes
+ *
+ * To be moved.
  */
 @property (nonatomic, readonly) RCTEventDispatcher *eventDispatcher;
 
@@ -75,28 +114,23 @@ extern NSString *const RCTReloadBridge;
 @property (nonatomic, copy, readonly) NSDictionary *modules;
 
 /**
- * The shadow queue is used to execute callbacks from the JavaScript code. All
- * native hooks (e.g. exported module methods) will be executed on the shadow
- * queue.
+ * The launch options that were used to initialize the bridge.
  */
-@property (nonatomic, readonly) dispatch_queue_t shadowQueue;
-
-/**
- * Global logging function that will print to both xcode and JS debugger consoles.
- *
- * NOTE: Use via RCTLog* macros defined in RCTLog.h
- * TODO (#5906496): should log function be exposed here, or could it be a module?
- */
-+ (void)log:(NSArray *)objects level:(NSString *)level;
-
 @property (nonatomic, copy, readonly) NSDictionary *launchOptions;
 
+/**
+ * Use this to check if the bridge is currently loading.
+ */
+@property (nonatomic, readonly, getter=isLoading) BOOL loading;
 
 /**
- * Method to check that a valid executor exists with which to log
+ * The block passed in the constructor with pre-initialized modules
  */
-+ (BOOL)hasValidJSExecutor;
+@property (nonatomic, copy, readonly) RCTBridgeModuleProviderBlock moduleProvider;
 
+/**
+ * Reload the bundle and reset executor & modules. Safe to call from any thread.
+ */
 - (void)reload;
 
 @end

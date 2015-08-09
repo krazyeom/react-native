@@ -1,13 +1,13 @@
 ---
-id: runningondevice
-title: Running On Device
+id: running-on-device-ios
+title: Running On Device (iOS)
 layout: docs
 category: Guides
-permalink: docs/runningondevice.html
-next: embedded-app
+permalink: docs/running-on-device-ios.html
+next: embedded-app-ios
 ---
 
-Note that running on device requires [Apple Developer account](https://developer.apple.com/register/index.action) and provisioning your iPhone. This guide covers only React Native specific topic.
+Note that running on device requires [Apple Developer account](https://developer.apple.com/register) and provisioning your iPhone. This guide covers only React Native specific topic.
 
 ## Accessing development server from device
 
@@ -28,12 +28,16 @@ You can also pack all the JavaScript code within the app itself. This way you ca
 1. Open `iOS/AppDelegate.m`
 2. Follow the instructions for "OPTION 2":
   * Uncomment `jsCodeLocation = [[NSBundle mainBundle] ...`
-  * Run given `curl` command in terminal from the root directory of your app
+  * Run the `react-native bundle` command in terminal from the root directory of your app
 
-Packager supports a couple of options:
+The bundle script supports a couple of flags:
 
-* `dev` (true by default) - sets the value of `__DEV__` variable. When `true` it turns on a bunch of useful development warnings. For production it is recommended to use `dev=false`.
-* `minify` (false by default) - whenever or not to pipe the JS code through UglifyJS.
+* `--dev` - sets the value of `__DEV__` variable to true. When `true` it turns on a bunch of useful development warnings. For production it is recommended to set `__DEV__=false`.
+* `--minify` - pipe the JS code through UglifyJS.
+
+## Disabling in-app developer menu
+
+When building your app for production, your app's scheme should be set to `Release` as detailed in [the debugging documentation](/react-native/docs/debugging.html#debugging-react-native-apps) in order to disable the in-app developer menu.
 
 ## Troubleshooting
 

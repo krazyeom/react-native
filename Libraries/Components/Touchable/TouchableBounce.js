@@ -11,18 +11,15 @@
  */
 'use strict';
 
+var Animated = require('Animated');
 var NativeMethodsMixin = require('NativeMethodsMixin');
 var React = require('React');
-var POPAnimation = require('POPAnimation');
-var Animation = require('Animation');
 var Touchable = require('Touchable');
 
 var merge = require('merge');
-var copyProperties = require('copyProperties');
-var onlyChild = require('onlyChild');
 
 type State = {
-    animationID: ?number;
+  animationID: ?number;
 };
 
 /**
@@ -53,40 +50,23 @@ var TouchableBounce = React.createClass({
   },
 
   getInitialState: function(): State {
-    return merge(this.touchableGetInitialState(), {animationID: null});
+    return {
+      ...this.touchableGetInitialState(),
+      scale: new Animated.Value(1),
+    };
   },
 
   bounceTo: function(
     value: number,
     velocity: number,
     bounciness: number,
-    fromValue?: ?Function | number,
     callback?: ?Function
   ) {
-    if (POPAnimation) {
-      this.state.animationID && this.removeAnimation(this.state.animationID);
-      var anim = {
-        property: POPAnimation.Properties.scaleXY,
-        dynamicsTension: 0,
-        toValue: [value, value],
-        velocity: [velocity, velocity],
-        springBounciness: bounciness,
-        fromValue: (undefined: ?any),
-      };
-      if (fromValue) {
-        anim.fromValue = [fromValue, fromValue];
-      }
-      this.state.animationID = POPAnimation.createSpringAnimation(anim);
-      this.addAnimation(this.state.animationID, callback);
-    } else {
-      Animation.startAnimation(this, 300, 0, 'easeOutBack', {scaleXY: [value, value]});
-      if (fromValue && typeof fromValue === 'function') {
-        callback = fromValue;
-      }
-      if (callback) {
-        setTimeout(callback, 300);
-      }
-    }
+    Animated.spring(this.state.scale, {
+      toValue: value,
+      velocity,
+      bounciness,
+    }).start(callback);
   },
 
   /**
@@ -104,13 +84,14 @@ var TouchableBounce = React.createClass({
   touchableHandlePress: function() {
     var onPressWithCompletion = this.props.onPressWithCompletion;
     if (onPressWithCompletion) {
-      onPressWithCompletion(
-        this.bounceTo.bind(this, 1, 10, 10, 0.93, this.props.onPressAnimationComplete)
-      );
+      onPressWithCompletion(() => {
+        this.state.scale.setValue(0.93);
+        this.bounceTo(1, 10, 10, this.props.onPressAnimationComplete);
+      });
       return;
     }
 
-    this.bounceTo(1, 10, 10, undefined, this.props.onPressAnimationComplete);
+    this.bounceTo(1, 10, 10, this.props.onPressAnimationComplete);
     this.props.onPress && this.props.onPress();
   },
 
@@ -122,20 +103,21 @@ var TouchableBounce = React.createClass({
     return 0;
   },
 
-  render: function() {
-    // Note(vjeux): use cloneWithProps once React has been upgraded
-    var child = onlyChild(this.props.children);
-    copyProperties(child.props, {
-      accessible: true,
-      testID: this.props.testID,
-      onStartShouldSetResponder: this.touchableHandleStartShouldSetResponder,
-      onResponderTerminationRequest: this.touchableHandleResponderTerminationRequest,
-      onResponderGrant: this.touchableHandleResponderGrant,
-      onResponderMove: this.touchableHandleResponderMove,
-      onResponderRelease: this.touchableHandleResponderRelease,
-      onResponderTerminate: this.touchableHandleResponderTerminate
-    });
-    return child;
+  render: function(): ReactElement {
+    return (
+      <Animated.View
+        style={[{transform: [{scale: this.state.scale}]}, this.props.style]}
+        accessible={true}
+        testID={this.props.testID}
+        onStartShouldSetResponder={this.touchableHandleStartShouldSetResponder}
+        onResponderTerminationRequest={this.touchableHandleResponderTerminationRequest}
+        onResponderGrant={this.touchableHandleResponderGrant}
+        onResponderMove={this.touchableHandleResponderMove}
+        onResponderRelease={this.touchableHandleResponderRelease}
+        onResponderTerminate={this.touchableHandleResponderTerminate}>
+        {this.props.children}
+      </Animated.View>
+    );
   }
 });
 

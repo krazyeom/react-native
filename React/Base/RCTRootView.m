@@ -11,31 +11,26 @@
 
 #import <objc/runtime.h>
 
+#import "RCTAssert.h"
 #import "RCTBridge.h"
 #import "RCTContextExecutor.h"
-#import "RCTDevMenu.h"
 #import "RCTEventDispatcher.h"
 #import "RCTKeyCommands.h"
 #import "RCTLog.h"
-#import "RCTRedBox.h"
+#import "RCTPerformanceLogger.h"
 #import "RCTSourceCode.h"
 #import "RCTTouchHandler.h"
 #import "RCTUIManager.h"
 #import "RCTUtils.h"
+#import "RCTView.h"
 #import "RCTWebViewExecutor.h"
 #import "UIView+React.h"
 
-NSString *const RCTJavaScriptDidLoadNotification = @"RCTJavaScriptDidLoadNotification";
-NSString *const RCTReloadNotification = @"RCTReloadNotification";
-NSString *const RCTReloadViewsNotification = @"RCTReloadViewsNotification";
+NSString *const RCTContentDidAppearNotification = @"RCTContentDidAppearNotification";
 
-/**
- * HACK(t6568049) This should be removed soon, hiding to prevent people from
- * relying on it
- */
 @interface RCTBridge (RCTRootView)
 
-- (void)setJavaScriptExecutor:(id<RCTJavaScriptExecutor>)executor;
+@property (nonatomic, weak, readonly) RCTBridge *batchedBridge;
 
 @end
 
@@ -45,31 +40,52 @@ NSString *const RCTReloadViewsNotification = @"RCTReloadViewsNotification";
 
 @end
 
+@interface RCTRootContentView : RCTView <RCTInvalidating>
+
+@property (nonatomic, readonly) BOOL contentHasAppeared;
+
+- (instancetype)initWithFrame:(CGRect)frame bridge:(RCTBridge *)bridge;
+
+@end
+
 @implementation RCTRootView
 {
-  RCTDevMenu *_devMenu;
   RCTBridge *_bridge;
-  RCTTouchHandler *_touchHandler;
   NSString *_moduleName;
-  BOOL _registered;
   NSDictionary *_launchOptions;
-  UIView *_contentView;
+  RCTRootContentView *_contentView;
 }
 
 - (instancetype)initWithBridge:(RCTBridge *)bridge
                     moduleName:(NSString *)moduleName
 {
+  RCTAssertMainThread();
   RCTAssert(bridge, @"A bridge instance is required to create an RCTRootView");
   RCTAssert(moduleName, @"A moduleName is required to create an RCTRootView");
 
-  if ((self = [super init])) {
-#ifdef DEBUG
-    _enableDevMenu = YES;
-#endif
+  if ((self = [super initWithFrame:CGRectZero])) {
+
+    self.backgroundColor = [UIColor whiteColor];
+
     _bridge = bridge;
     _moduleName = moduleName;
-    self.backgroundColor = [UIColor whiteColor];
-    [self setUp];
+    _loadingViewFadeDelay = 0.25;
+    _loadingViewFadeDuration = 0.25;
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(javaScriptDidLoad:)
+                                                 name:RCTJavaScriptDidLoadNotification
+                                               object:_bridge];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(hideLoadingView)
+                                                 name:RCTContentDidAppearNotification
+                                               object:self];
+    if (!_bridge.batchedBridge.isLoading) {
+      [self bundleFinishedLoading:_bridge.batchedBridge];
+    }
+
+    [self showLoadingView];
   }
   return self;
 }
@@ -78,73 +94,24 @@ NSString *const RCTReloadViewsNotification = @"RCTReloadViewsNotification";
                        moduleName:(NSString *)moduleName
                     launchOptions:(NSDictionary *)launchOptions
 {
-  RCTBridge *bridge = [[RCTBridge alloc] initWithBundlePath:bundleURL.absoluteString
-                                             moduleProvider:nil
-                                              launchOptions:launchOptions];
-  return [self initWithBridge:bridge
-                   moduleName:moduleName];
+  RCTBridge *bridge = [[RCTBridge alloc] initWithBundleURL:bundleURL
+                                            moduleProvider:nil
+                                             launchOptions:launchOptions];
+
+  return [self initWithBridge:bridge moduleName:moduleName];
 }
 
-- (void)dealloc
+RCT_NOT_IMPLEMENTED(-initWithFrame:(CGRect)frame)
+RCT_NOT_IMPLEMENTED(-initWithCoder:(NSCoder *)aDecoder)
+
+- (void)setBackgroundColor:(UIColor *)backgroundColor
 {
-  [self tearDown];
+  super.backgroundColor = backgroundColor;
+  _contentView.backgroundColor = backgroundColor;
 }
 
-- (void)setUp
+- (UIViewController *)backingViewController
 {
-  if (!_registered) {
-    /**
-     * Every root view that is created must have a unique react tag.
-     * Numbering of these tags goes from 1, 11, 21, 31, etc
-     *
-     * NOTE: Since the bridge persists, the RootViews might be reused, so now
-     * the react tag is assigned every time we load new content.
-     */
-    _contentView = [[UIView alloc] init];
-    _contentView.reactTag = [_bridge.uiManager allocateRootTag];
-    _touchHandler = [[RCTTouchHandler alloc] initWithBridge:_bridge];
-    [_contentView addGestureRecognizer:_touchHandler];
-    [self addSubview:_contentView];
-
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(reload)
-                                                 name:RCTReloadViewsNotification
-                                               object:_bridge];
-    if (_bridge.loaded) {
-      [self bundleFinishedLoading];
-    } else {
-      [[NSNotificationCenter defaultCenter] addObserver:self
-                                               selector:@selector(bundleFinishedLoading)
-                                                   name:RCTJavaScriptDidLoadNotification
-                                                 object:_bridge];
-    }
-  }
-}
-
-- (void)tearDown
-{
-  if (_registered) {
-    _registered = NO;
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [_contentView removeGestureRecognizer:_touchHandler];
-    [_contentView removeFromSuperview];
-    [_touchHandler invalidate];
-    [_bridge enqueueJSCall:@"ReactIOS.unmountComponentAtNodeAndRemoveContainer"
-                      args:@[_contentView.reactTag]];
-  }
-}
-
-- (BOOL)isValid
-{
-  return _registered;
-}
-
-- (void)invalidate
-{
-  [self tearDown];
-}
-
-- (UIViewController *)backingViewController {
   return _backingViewController ?: [super backingViewController];
 }
 
@@ -153,36 +120,67 @@ NSString *const RCTReloadViewsNotification = @"RCTReloadViewsNotification";
   return YES;
 }
 
-- (void)motionEnded:(UIEventSubtype)motion withEvent:(UIEvent *)event
+- (void)setLoadingView:(UIView *)loadingView
 {
-  if (motion == UIEventSubtypeMotionShake && self.enableDevMenu) {
-    if (!_devMenu) {
-      _devMenu = [[RCTDevMenu alloc] initWithBridge:self.bridge];
-    }
-    [_devMenu show];
+  _loadingView = loadingView;
+  if (!_contentView.contentHasAppeared) {
+    [self showLoadingView];
   }
 }
 
-+ (NSArray *)JSMethods
+- (void)showLoadingView
 {
-  return @[
-    @"AppRegistry.runApplication",
-    @"ReactIOS.unmountComponentAtNodeAndRemoveContainer"
-  ];
+  if (_loadingView && !_contentView.contentHasAppeared) {
+    _loadingView.hidden = NO;
+    [self addSubview:_loadingView];
+  }
 }
 
-- (void)bundleFinishedLoading
+- (void)hideLoadingView
+{
+  if (_loadingView.superview == self && _contentView.contentHasAppeared) {
+
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(_loadingViewFadeDelay * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+
+      [UIView transitionWithView:self
+                        duration:_loadingViewFadeDuration
+                         options:UIViewAnimationOptionTransitionCrossDissolve
+                      animations:^{
+                        _loadingView.hidden = YES;
+                      } completion:^(__unused BOOL finished) {
+                        [_loadingView removeFromSuperview];
+                      }];
+    });
+  }
+}
+
+- (void)javaScriptDidLoad:(NSNotification *)notification
+{
+  RCTBridge *bridge = notification.userInfo[@"bridge"];
+  [self bundleFinishedLoading:bridge];
+}
+
+- (void)bundleFinishedLoading:(RCTBridge *)bridge
 {
   dispatch_async(dispatch_get_main_queue(), ^{
-    _registered = YES;
+    if (!bridge.isValid) {
+      return;
+    }
+
+    [_contentView removeFromSuperview];
+    _contentView = [[RCTRootContentView alloc] initWithFrame:self.bounds bridge:bridge];
+    _contentView.backgroundColor = self.backgroundColor;
+    [self insertSubview:_contentView atIndex:0];
+
     NSString *moduleName = _moduleName ?: @"";
     NSDictionary *appParameters = @{
-                                    @"rootTag": _contentView.reactTag,
-                                    @"initialProps": self.initialProperties ?: @{},
-                                    };
-    [_bridge.uiManager registerRootView:_contentView];
-    [_bridge enqueueJSCall:@"AppRegistry.runApplication"
-                      args:@[moduleName, appParameters]];
+      @"rootTag": _contentView.reactTag,
+      @"initialProps": _initialProperties ?: @{},
+    };
+
+    [bridge enqueueJSCall:@"AppRegistry.runApplication"
+                     args:@[moduleName, appParameters]];
   });
 }
 
@@ -190,27 +188,10 @@ NSString *const RCTReloadViewsNotification = @"RCTReloadViewsNotification";
 {
   [super layoutSubviews];
   _contentView.frame = self.bounds;
-  if (_registered) {
-    [_bridge.uiManager setFrame:self.frame forRootView:_contentView];
-  }
-}
-
-- (void)setFrame:(CGRect)frame
-{
-  [super setFrame:frame];
-  _contentView.frame = self.bounds;
-}
-
-- (void)reload
-{
-  [self tearDown];
-  [self setUp];
-}
-
-+ (void)reloadAll
-{
-  [[NSNotificationCenter defaultCenter] postNotificationName:RCTReloadNotification
-                                                      object:self];
+  _loadingView.center = (CGPoint){
+    CGRectGetMidX(self.bounds),
+    CGRectGetMidY(self.bounds)
+  };
 }
 
 - (NSNumber *)reactTag
@@ -218,14 +199,17 @@ NSString *const RCTReloadViewsNotification = @"RCTReloadViewsNotification";
   return _contentView.reactTag;
 }
 
-- (void)startOrResetInteractionTiming
+- (void)contentViewInvalidated
 {
-  [_touchHandler startOrResetInteractionTiming];
+  [_contentView removeFromSuperview];
+  _contentView = nil;
+  [self showLoadingView];
 }
 
-- (NSDictionary *)endAndResetInteractionTiming
+- (void)dealloc
 {
-  return [_touchHandler endAndResetInteractionTiming];
+  [[NSNotificationCenter defaultCenter] removeObserver:self];
+  [_contentView invalidate];
 }
 
 @end
@@ -237,6 +221,90 @@ NSString *const RCTReloadViewsNotification = @"RCTReloadViewsNotification";
   NSNumber *rootTag = objc_getAssociatedObject(self, _cmd) ?: @1;
   objc_setAssociatedObject(self, _cmd, @(rootTag.integerValue + 10), OBJC_ASSOCIATION_RETAIN_NONATOMIC);
   return rootTag;
+}
+
+@end
+
+@implementation RCTRootContentView
+{
+  __weak RCTBridge *_bridge;
+  RCTTouchHandler *_touchHandler;
+  UIColor *_backgroundColor;
+}
+
+- (instancetype)initWithFrame:(CGRect)frame
+                       bridge:(RCTBridge *)bridge
+{
+  if ((self = [super init])) {
+    _bridge = bridge;
+    [self setUp];
+    self.frame = frame;
+    self.layer.backgroundColor = NULL;
+  }
+  return self;
+}
+
+- (void)insertReactSubview:(id<RCTViewNodeProtocol>)subview atIndex:(NSInteger)atIndex
+{
+  [super insertReactSubview:subview atIndex:atIndex];
+  RCTPerformanceLoggerEnd(RCTPLTTI);
+  dispatch_async(dispatch_get_main_queue(), ^{
+    if (!_contentHasAppeared) {
+      _contentHasAppeared = YES;
+      [[NSNotificationCenter defaultCenter] postNotificationName:RCTContentDidAppearNotification
+                                                          object:self.superview];
+    }
+  });
+}
+
+- (void)setFrame:(CGRect)frame
+{
+  super.frame = frame;
+  if (self.reactTag && _bridge.isValid) {
+    [_bridge.uiManager setFrame:frame forRootView:self];
+  }
+}
+
+- (void)setBackgroundColor:(UIColor *)backgroundColor
+{
+  _backgroundColor = backgroundColor;
+  if (self.reactTag && _bridge.isValid) {
+    [_bridge.uiManager setBackgroundColor:backgroundColor forRootView:self];
+  }
+}
+
+- (UIColor *)backgroundColor
+{
+  return _backgroundColor;
+}
+
+- (void)setUp
+{
+  /**
+   * Every root view that is created must have a unique react tag.
+   * Numbering of these tags goes from 1, 11, 21, 31, etc
+   *
+   * NOTE: Since the bridge persists, the RootViews might be reused, so now
+   * the react tag is assigned every time we load new content.
+   */
+  self.reactTag = [_bridge.uiManager allocateRootTag];
+  [self addGestureRecognizer:[[RCTTouchHandler alloc] initWithBridge:_bridge]];
+  [_bridge.uiManager registerRootView:self];
+}
+
+- (BOOL)isValid
+{
+  return self.userInteractionEnabled;
+}
+
+- (void)invalidate
+{
+  if (self.isValid) {
+    self.userInteractionEnabled = NO;
+    [(RCTRootView *)self.superview contentViewInvalidated];
+    [_bridge enqueueJSCall:@"ReactNative.unmountComponentAtNodeAndRemoveContainer"
+                      args:@[self.reactTag]];
+  }
 }
 
 @end

@@ -11,12 +11,23 @@
 
 #import "RCTBridge.h"
 
-extern NSString *const RCTJavaScriptDidLoadNotification;
-extern NSString *const RCTReloadNotification;
-extern NSString *const RCTReloadViewsNotification;
+/**
+ * This notification is sent when the first subviews are added to the root view
+ * after the application has loaded. This is used to hide the `loadingView`, and
+ * is a good indicator that the application is ready to use.
+ */
+extern NSString *const RCTContentDidAppearNotification;
 
-@interface RCTRootView : UIView <RCTInvalidating>
+/**
+ * Native view used to host React-managed views within the app. Can be used just
+ * like any ordinary UIView. You can have multiple RCTRootViews on screen at
+ * once, all controlled by the same JavaScript application.
+ */
+@interface RCTRootView : UIView
 
+/**
+ * - Designated initializer -
+ */
 - (instancetype)initWithBridge:(RCTBridge *)bridge
                     moduleName:(NSString *)moduleName NS_DESIGNATED_INITIALIZER;
 
@@ -39,6 +50,10 @@ extern NSString *const RCTReloadViewsNotification;
  */
 @property (nonatomic, copy, readonly) NSString *moduleName;
 
+/**
+ * The bridge used by the root view. Bridges can be shared between multiple
+ * root views, so you can use this property to initialize another RCTRootView.
+ */
 @property (nonatomic, strong, readonly) RCTBridge *bridge;
 
 /**
@@ -55,22 +70,27 @@ extern NSString *const RCTReloadViewsNotification;
 @property (nonatomic, strong) Class executorClass;
 
 /**
- * If YES will watch for shake gestures and show development menu
- * with options like "Reload", "Enable Debugging", etc.
+ * The backing view controller of the root view.
  */
-@property (nonatomic, assign) BOOL enableDevMenu;
-
-/**
- * Reload this root view, or all root views, respectively.
- */
-- (void)reload;
-+ (void)reloadAll;
-
 @property (nonatomic, weak) UIViewController *backingViewController;
 
+/**
+ * The React-managed contents view of the root view.
+ */
 @property (nonatomic, strong, readonly) UIView *contentView;
 
-- (void)startOrResetInteractionTiming;
-- (NSDictionary *)endAndResetInteractionTiming;
+/**
+ * A view to display while the JavaScript is loading, so users aren't presented
+ * with a blank screen. By default this is nil, but you can override it with
+ * (for example) a UIActivityIndicatorView or a placeholder image.
+ */
+@property (nonatomic, strong) UIView *loadingView;
+
+/**
+ * Timings for hiding the loading view after the content has loaded. Both of
+ * these values default to 0.25 seconds.
+ */
+@property (nonatomic, assign) NSTimeInterval loadingViewFadeDelay;
+@property (nonatomic, assign) NSTimeInterval loadingViewFadeDuration;
 
 @end
