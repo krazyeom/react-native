@@ -59,7 +59,7 @@
 
 - (NSURLSessionDownloadTask *)downloadData:(NSURL *)url progressBlock:(RCTDataProgressBlock)progressBlock completionBlock:(RCTDataCompletionBlock)completionBlock
 {
-  NSURLSessionDownloadTask *task = [_URLSession downloadTaskWithURL:url];
+  NSURLSessionDownloadTask *task = [_URLSession downloadTaskWithURL:url completionHandler:^(NSURL *location, NSURLResponse *response, NSError *error) {}];
   task.reactCompletionBlock = completionBlock;
   task.reactProgressBlock = progressBlock;
   return task;
